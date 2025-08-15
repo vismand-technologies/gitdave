@@ -69,9 +69,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "notarize": {
-        "appleId": "${env.APPLE_ID}",
-        "appleIdPassword": "${env.APPLE_APP_SPECIFIC_PASSWORD}",
-        "teamId": "${env.APPLE_TEAM_ID}"
+        "appBundleId": "com.gitdave.app",
+        "ascProvider": "${env.ASC_PROVIDER}"
       },
       "target": [
         { "target": "dmg", "arch": ["x64", "arm64"] }
