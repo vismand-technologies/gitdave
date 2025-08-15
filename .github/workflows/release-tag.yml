@@ -1,0 +1,66 @@
+name: Release (Tag)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-publish:
+    name: Build and Publish Installers
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Configure macOS signing (no-op if env not set)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "APPLE_ID=${APPLE_ID:-not-set}" > /dev/null
+        shell: bash
+
+      - name: Configure Windows signing (no-op if env not set)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "CSC_LINK is ${env:CSC_LINK:-not-set}" > $null
+        shell: pwsh
+
+      - name: Install WiX Toolset (Windows only)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install wixtoolset --version=3.14.0 -y
+        shell: pwsh
+
+      - name: Package and Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            npm run dist:linux -- -p always
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            npm run dist:mac -- -p always
+          else
+            npm run dist:win:all -- -p always
+          fi
+        shell: bash

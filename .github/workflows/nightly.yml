@@ -1,0 +1,96 @@
+name: Nightly Pre-release
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 03:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  changes:
+    name: Check for commits in last 24h
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check commits
+        id: check
+        run: |
+          COUNT=$(git rev-list --count --since="24 hours ago" HEAD || echo 0)
+          echo "Commits in last 24h: $COUNT"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-publish:
+    name: Build and Publish Nightly
+    needs: changes
+    if: needs.changes.outputs.should_build == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install WiX Toolset (Windows only)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install wixtoolset --version=3.14.0 -y
+        shell: pwsh
+
+      - name: Compute nightly tag
+        id: meta
+        run: |
+          DATE=$(date -u +"%Y%m%d")
+          echo "tag=nightly-$DATE" >> "$GITHUB_OUTPUT"
+          echo "release_name=Nightly $DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Package and Publish prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            npm run dist:linux -- -p always --prerelease --publish=always
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            npm run dist:mac -- -p always --prerelease --publish=always
+          else
+            npm run dist:win:all -- -p always --prerelease --publish=always
+          fi
+        shell: bash
+
+      - name: Mark release as prerelease and update tag
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          NAME="${{ steps.meta.outputs.release_name }}"
+          gh release view "$TAG" >/dev/null 2>&1 && \
+            gh release edit "$TAG" --prerelease --title "$NAME" || \
+            gh release create "$TAG" --prerelease --notes "Automated nightly build" --title "$NAME"
+        shell: bash
