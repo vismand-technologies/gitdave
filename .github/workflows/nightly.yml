@@ -9,6 +9,8 @@ jobs:
   changes:
     name: Check for commits in last 24h
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
@@ -32,6 +34,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.should_build == 'true'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      packages: write
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}
       cancel-in-progress: true

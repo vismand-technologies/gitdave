@@ -9,6 +9,9 @@ jobs:
   build-and-publish:
     name: Build and Publish Installers
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      packages: write
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}
       cancel-in-progress: true
