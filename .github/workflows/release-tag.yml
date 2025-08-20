@@ -14,7 +14,7 @@ jobs:
       packages: write
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -72,13 +72,17 @@ jobs:
 
       - name: Configure macOS signing mode (unsigned by default; enable if secrets present)
         if: matrix.os == 'macos-latest'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          ASC_PROVIDER: ${{ secrets.ASC_PROVIDER }}
         run: |
-          if [[ -n "${{ secrets.APPLE_ID }}" && -n "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ]]; then
+          if [[ -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" ]]; then
             echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
             echo "ELECTRON_BUILDER_DISABLE_NOTARIZE=false" >> "$GITHUB_ENV"
-            echo "APPLE_ID=${{ secrets.APPLE_ID }}" >> "$GITHUB_ENV"
-            echo "APPLE_APP_SPECIFIC_PASSWORD=${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" >> "$GITHUB_ENV"
-            echo "ASC_PROVIDER=${{ secrets.ASC_PROVIDER }}" >> "$GITHUB_ENV"
+            echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
+            echo "APPLE_APP_SPECIFIC_PASSWORD=$APPLE_APP_SPECIFIC_PASSWORD" >> "$GITHUB_ENV"
+            echo "ASC_PROVIDER=$ASC_PROVIDER" >> "$GITHUB_ENV"
           else
             echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
             echo "ELECTRON_BUILDER_DISABLE_NOTARIZE=true" >> "$GITHUB_ENV"
@@ -108,55 +112,72 @@ jobs:
           fi
         shell: bash
 
-      - name: Upload Release Assets
-        if: matrix.os == 'ubuntu-latest'
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-artifacts
+          path: |
+            app/release/*.deb
+            app/release/*.AppImage
+            app/release/*.exe
+            app/release/*.msi
+            app/release/*.dmg
+          retention-days: 30
+
+  publish-release:
+    name: Publish Release
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create and upload release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Create release if it doesn't exist
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           RELEASE_NAME="Release $TAG_NAME"
           
-          # Check if release exists
+          # Create release if it doesn't exist
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             echo "Creating release $TAG_NAME"
             gh release create "$TAG_NAME" \
               --title "$RELEASE_NAME" \
-              --notes "Automated release for $TAG_NAME" \
+              --notes "Release $TAG_NAME" \
               --draft=false \
-              --prerelease=true
+              --prerelease=false
           fi
           
-          # Upload Linux artifacts
-          echo "Uploading Linux artifacts..."
-          find release -name "*.deb" -o -name "*.AppImage" | while read file; do
-            echo "Uploading: $file"
-            gh release upload "$TAG_NAME" "$file" --clobber
-          done
-        shell: bash
-
-      - name: Upload Windows Assets
-        if: matrix.os == 'windows-latest'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          echo "Uploading Windows artifacts..."
-          Get-ChildItem release -Include "*.exe", "*.msi" -Recurse | ForEach-Object {
-            Write-Host "Uploading: $($_.FullName)"
-            gh release upload "$TAG_NAME" "$($_.FullName)" --clobber
-          }
-        shell: pwsh
-
-      - name: Upload macOS Assets
-        if: matrix.os == 'macos-latest'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          echo "Uploading macOS artifacts..."
-          find release -name "*.dmg" | while read file; do
-            echo "Uploading: $file"
-            gh release upload "$TAG_NAME" "$file" --clobber
+          # Upload all artifacts with retry mechanism
+          for artifact_dir in artifacts/*/; do
+            if [ -d "$artifact_dir" ]; then
+              echo "Processing artifacts from: $artifact_dir"
+              find "$artifact_dir" -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \) | while read file; do
+                if [ -f "$file" ]; then
+                  echo "Uploading: $file"
+                  for i in {1..5}; do
+                    if gh release upload "$TAG_NAME" "$file" --clobber; then
+                      echo "Successfully uploaded: $file"
+                      break
+                    else
+                      echo "Upload failed, retrying ($i/5)..."
+                      sleep 10
+                      if [ $i -eq 5 ]; then
+                        echo "Failed to upload $file after 5 attempts"
+                        exit 1
+                      fi
+                    fi
+                  done
+                fi
+              done
+            fi
           done
         shell: bash
