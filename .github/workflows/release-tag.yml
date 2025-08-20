@@ -98,7 +98,12 @@ jobs:
       - name: Install WiX Toolset (Windows only)
         if: matrix.os == 'windows-latest'
         run: |
-          choco install wixtoolset --version=3.14.0 -y
+          # Check if WiX is already installed, if not install it
+          if (!(Get-Command "candle.exe" -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --force -y
+          } else {
+            Write-Host "WiX Toolset already installed"
+          }
         shell: pwsh
 
       - name: Package (Build Only)
