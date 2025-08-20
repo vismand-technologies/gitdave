@@ -113,7 +113,7 @@ jobs:
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             npm run dist:mac -- -p never
           else
-            npm run dist:win:all -- -p never
+            npm run dist:win -- -p never
           fi
         shell: bash
 
