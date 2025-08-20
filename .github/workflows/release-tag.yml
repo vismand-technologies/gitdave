@@ -97,15 +97,66 @@ jobs:
           choco install wixtoolset --version=3.14.0 -y
         shell: pwsh
 
-      - name: Package and Publish
+      - name: Package (Build Only)
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            npm run dist:linux -- -p never
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            npm run dist:mac -- -p never
+          else
+            npm run dist:win:all -- -p never
+          fi
+        shell: bash
+
+      - name: Upload Release Assets
+        if: matrix.os == 'ubuntu-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            npm run dist:linux -- -p always
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            npm run dist:mac -- -p always
-          else
-            npm run dist:win:all -- -p always
+          # Create release if it doesn't exist
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          RELEASE_NAME="Release $TAG_NAME"
+          
+          # Check if release exists
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Creating release $TAG_NAME"
+            gh release create "$TAG_NAME" \
+              --title "$RELEASE_NAME" \
+              --notes "Automated release for $TAG_NAME" \
+              --draft=false \
+              --prerelease=true
           fi
+          
+          # Upload Linux artifacts
+          echo "Uploading Linux artifacts..."
+          find release -name "*.deb" -o -name "*.AppImage" | while read file; do
+            echo "Uploading: $file"
+            gh release upload "$TAG_NAME" "$file" --clobber
+          done
+        shell: bash
+
+      - name: Upload Windows Assets
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "Uploading Windows artifacts..."
+          Get-ChildItem release -Include "*.exe", "*.msi" -Recurse | ForEach-Object {
+            Write-Host "Uploading: $($_.FullName)"
+            gh release upload "$TAG_NAME" "$($_.FullName)" --clobber
+          }
+        shell: pwsh
+
+      - name: Upload macOS Assets
+        if: matrix.os == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "Uploading macOS artifacts..."
+          find release -name "*.dmg" | while read file; do
+            echo "Uploading: $file"
+            gh release upload "$TAG_NAME" "$file" --clobber
+          done
         shell: bash
