@@ -125,6 +125,7 @@ jobs:
           DATE=$(date -u +"%Y%m%d")
           echo "tag=nightly-$DATE" >> "$GITHUB_OUTPUT"
           echo "release_name=Nightly $DATE" >> "$GITHUB_OUTPUT"
+        shell: bash
 
       - name: Package (Build Only)
         run: |
@@ -165,6 +166,7 @@ jobs:
           DATE=$(date -u +"%Y%m%d")
           echo "tag=nightly-$DATE" >> "$GITHUB_OUTPUT"
           echo "release_name=Nightly $DATE" >> "$GITHUB_OUTPUT"
+        shell: bash
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
